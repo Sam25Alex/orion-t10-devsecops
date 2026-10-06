@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    {% if user %}
+        <h3>Laisser un commentaire</h3>
+        <form method="post" action="{{ url_for('comment') }}">
+            <textarea name="content" rows="3" placeholder="Votre commentaire..."></textarea>
+            <button type="submit">Publier</button>
+        </form>
+    {% else %}
+        <p><em>Connecte-toi pour laisser un commentaire.</em></p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Commentaires</h3>
+    {% for c in comments %}
+        <div class="comment">
+            <b>{{ c["username"] }}</b> :
+            {# VULNÉRABILITÉ OWASP A03 — XSS stocké : le filtre |safe désactive #}
+            {# l'échappement HTML automatique de Jinja2. #}
+            {{ c["content"] | safe }}
+        </div>
+    {% else %}
+        <p>Aucun commentaire pour le moment.</p>
+    {% endfor %}
+</div>
+{% endblock %}
