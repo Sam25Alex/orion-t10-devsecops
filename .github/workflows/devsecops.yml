@@ -1,0 +1,133 @@
+# Pipeline DevSecOps — Projet T10 (Laboratoire ORION / ISTIN)
+#
+# Ce pipeline met en œuvre l'objectif spécifique n°2 du cadrage scientifique :
+# intégrer successivement une analyse statique (SAST), une analyse des
+# dépendances (SCA) et une analyse dynamique (DAST) de l'application.
+#
+# Il se déclenche automatiquement à chaque "push" ou "pull request" sur la
+# branche principale.
+
+name: Pipeline DevSecOps (SAST / SCA / DAST)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  # -----------------------------------------------------------------------
+  # 1. SAST — Static Application Security Testing
+  #    Analyse le code source sans l'exécuter, à la recherche de
+  #    vulnérabilités connues (ex : injection SQL, usage de MD5, etc.)
+  # -----------------------------------------------------------------------
+  sast:
+    name: SAST (Bandit + Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les outils SAST
+        run: pip install bandit semgrep
+
+      - name: Lancer Bandit (analyse du code Python)
+        run: bandit -r . -x ./venv,./.github -f txt -o bandit-report.txt
+        continue-on-error: true
+
+      - name: Afficher le rapport Bandit
+        run: cat bandit-report.txt
+
+      - name: Lancer Semgrep (règles OWASP Top 10)
+        run: semgrep --config p/owasp-top-ten --error --output semgrep-report.txt .
+        continue-on-error: true
+
+      - name: Afficher le rapport Semgrep
+        run: cat semgrep-report.txt
+
+      - name: Archiver les rapports SAST
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapports-sast
+          path: |
+            bandit-report.txt
+            semgrep-report.txt
+
+  # -----------------------------------------------------------------------
+  # 2. SCA — Software Composition Analysis
+  #    Vérifie les vulnérabilités connues dans les dépendances tierces
+  #    (bibliothèques listées dans requirements.txt)
+  # -----------------------------------------------------------------------
+  sca:
+    name: SCA (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer pip-audit
+        run: pip install pip-audit
+
+      - name: Analyser les dépendances (requirements.txt)
+        run: pip-audit -r requirements.txt -o sca-report.txt --format markdown
+        continue-on-error: true
+
+      - name: Afficher le rapport SCA
+        run: cat sca-report.txt
+
+      - name: Archiver le rapport SCA
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-sca
+          path: sca-report.txt
+
+  # -----------------------------------------------------------------------
+  # 3. DAST — Dynamic Application Security Testing
+  #    Attaque l'application pendant qu'elle est en cours d'exécution,
+  #    comme le ferait un attaquant réel (via OWASP ZAP).
+  # -----------------------------------------------------------------------
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    needs: [ sast, sca ]
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Construire l'image Docker de l'application
+        run: docker build -t orion-webapp .
+
+      - name: Démarrer l'application en conteneur
+        run: docker run -d -p 5000:5000 --name orion-webapp orion-webapp
+
+      - name: Attendre que l'application soit prête
+        run: |
+          for i in {1..10}; do
+            curl -sf http://localhost:5000 && break
+            echo "En attente du démarrage de l'application..."
+            sleep 3
+          done
+
+      - name: Lancer le scan OWASP ZAP (baseline)
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://localhost:5000"
+          cmd_options: "-a"
+          fail_action: false
+
+      - name: Archiver le rapport DAST
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-dast
+          path: report_html.html
