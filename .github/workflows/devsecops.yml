@@ -15,13 +15,9 @@ on:
   pull_request:
     branches: [ main ]
 
-# Permissions minimales par défaut pour le jeton GITHUB_TOKEN. Le job DAST
-# en a besoin de "issues: write" pour que l'action OWASP ZAP puisse publier
-# son rapport ; sans cette ligne, GitHub refuse l'accès avec l'erreur
-# "Resource not accessible by integration".
+# Permissions minimales pour le jeton GITHUB_TOKEN.
 permissions:
   contents: read
-  issues: write
 
 jobs:
 
@@ -117,7 +113,7 @@ jobs:
         run: docker build -t orion-webapp .
 
       - name: Démarrer l'application en conteneur
-        run: docker run -d -p 5000:5000 --name orion-webapp orion-webapp
+        run: docker run -d --network host --name orion-webapp orion-webapp
 
       - name: Attendre que l'application soit prête
         run: |
@@ -127,16 +123,22 @@ jobs:
             sleep 3
           done
 
+      # Remarque : la première version de ce pipeline utilisait l'action
+      # "zaproxy/action-baseline", qui s'appuie en interne sur l'ancien
+      # service de stockage d'artefacts de GitHub (API v3), aujourd'hui
+      # retiré. Cela provoquait l'erreur "Create Artifact Container failed".
+      # Correctif : on invoque directement l'image Docker officielle d'OWASP
+      # ZAP, et on archive nous-mêmes le rapport avec actions/upload-artifact
+      # en version 4 (déjà utilisée ailleurs dans ce pipeline).
       - name: Lancer le scan OWASP ZAP (baseline)
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: "http://localhost:5000"
-          cmd_options: "-a"
-          fail_action: false
-          allow_issue_writing: false
+        run: |
+          mkdir -p zap-report
+          docker run --network host -v "$(pwd)/zap-report:/zap/wrk/:rw" \
+            -t zaproxy/zap-stable zap-baseline.py \
+            -t http://localhost:5000 -r zap_report.html || true
 
       - name: Archiver le rapport DAST
         uses: actions/upload-artifact@v4
         with:
           name: rapport-dast
-          path: report_html.html
+          path: zap-report/zap_report.html
