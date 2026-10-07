@@ -15,6 +15,14 @@ on:
   pull_request:
     branches: [ main ]
 
+# Permissions minimales par défaut pour le jeton GITHUB_TOKEN. Le job DAST
+# en a besoin de "issues: write" pour que l'action OWASP ZAP puisse publier
+# son rapport ; sans cette ligne, GitHub refuse l'accès avec l'erreur
+# "Resource not accessible by integration".
+permissions:
+  contents: read
+  issues: write
+
 jobs:
 
   # -----------------------------------------------------------------------
@@ -125,6 +133,7 @@ jobs:
           target: "http://localhost:5000"
           cmd_options: "-a"
           fail_action: false
+          allow_issue_writing: false
 
       - name: Archiver le rapport DAST
         uses: actions/upload-artifact@v4
