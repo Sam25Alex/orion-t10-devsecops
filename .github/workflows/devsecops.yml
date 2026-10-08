@@ -133,6 +133,11 @@ jobs:
       - name: Lancer le scan OWASP ZAP (baseline)
         run: |
           mkdir -p zap-report
+          # L'image Docker officielle de ZAP tourne avec un utilisateur non
+          # privilégié ("zap"), différent de celui de l'hôte GitHub Actions.
+          # Sans ce chmod, ZAP ne peut pas écrire son rapport dans le dossier
+          # partagé, d'où l'erreur "AccessDeniedException /zap/wrk/zap_report.html".
+          chmod 777 zap-report
           docker run --network host -v "$(pwd)/zap-report:/zap/wrk/:rw" \
             -t zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:5000 -r zap_report.html || true
