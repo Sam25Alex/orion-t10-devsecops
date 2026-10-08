@@ -14,7 +14,7 @@ NE JAMAIS déployer ce code tel quel sur un serveur exposé à Internet.
 """
 
 import sqlite3
-import hashlib
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, request, render_template, redirect, url_for, session, g
 
 app = Flask(__name__)
@@ -60,23 +60,26 @@ def init_db():
         );
         """
     )
-    # Utilisateur de démonstration (mot de passe volontairement faible : "admin123")
+    # Utilisateur de démonstration (compte : admin / admin123)
     db.execute(
         "INSERT INTO users (username, password) VALUES (?, ?)",
-        ("admin", hash_password_weak("admin123")),
+        ("admin", generate_password_hash("admin123")),
     )
     db.commit()
     db.close()
 
 
 # -------------------------------------------------------------------------
-# VULNÉRABILITÉ OWASP A02:2021 — Cryptographic Failures
+# CORRECTIF — OWASP A02:2021 — Cryptographic Failures
 # -------------------------------------------------------------------------
-# Le mot de passe est haché avec MD5, un algorithme obsolète et rapide à
-# casser par force brute / tables arc-en-ciel. Aucun "sel" (salt) n'est
-# utilisé. Un algorithme adapté serait bcrypt, scrypt ou Argon2.
-def hash_password_weak(password: str) -> str:
-    return hashlib.md5(password.encode()).hexdigest()
+# Avant : le mot de passe était haché avec MD5 (hashlib.md5), un algorithme
+# obsolète, rapide à casser par force brute et par tables arc-en-ciel, sans
+# "sel" (salt).
+# Après : utilisation de werkzeug.security.generate_password_hash, qui
+# applique par défaut l'algorithme scrypt avec un sel aléatoire généré
+# automatiquement à chaque hachage (donc deux mots de passe identiques
+# produisent deux empreintes différentes). La vérification se fait avec
+# check_password_hash, qui gère la comparaison de façon sûre.
 
 
 # -------------------------------------------------------------------------
@@ -98,7 +101,7 @@ def register():
         try:
             db.execute(
                 "INSERT INTO users (username, password) VALUES (?, ?)",
-                (username, hash_password_weak(password)),
+                (username, generate_password_hash(password)),
             )
             db.commit()
         except sqlite3.IntegrityError:
@@ -108,27 +111,31 @@ def register():
 
 
 # -------------------------------------------------------------------------
-# VULNÉRABILITÉ OWASP A03:2021 — Injection (SQL Injection)
+# CORRECTIF — OWASP A03:2021 — Injection (SQL Injection)
 # -------------------------------------------------------------------------
-# La requête SQL est construite par concaténation directe de chaînes à
-# partir d'une entrée utilisateur non filtrée (f-string). Un attaquant
-# peut injecter du SQL arbitraire, par exemple avec le login :
-#   admin' OR '1'='1
-# pour contourner l'authentification sans connaître le mot de passe.
-# Le correctif attendu est l'utilisation de requêtes paramétrées (comme
-# c'est déjà fait correctement dans register() ci-dessus).
+# Avant : la requête SQL était construite par concaténation directe de
+# chaînes à partir d'une entrée utilisateur non filtrée (f-string), ce qui
+# permettait de contourner l'authentification avec une saisie du type
+# admin' OR '1'='1 dans le champ nom d'utilisateur.
+# Après : la requête utilise un paramètre lié ("?"), géré nativement par
+# le pilote SQLite. La valeur saisie par l'utilisateur est alors toujours
+# traitée comme une donnée et jamais comme du code SQL exécutable. Le mot
+# de passe n'est plus comparé directement en SQL : il est vérifié après
+# coup avec check_password_hash, puisque le hachage scrypt produit un sel
+# différent à chaque fois (on ne peut donc plus comparer deux hachages
+# directement dans la requête).
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         username = request.form["username"]
         password = request.form["password"]
-        hashed = hash_password_weak(password)
 
         db = get_db()
-        query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{hashed}'"
-        user = db.execute(query).fetchone()
+        user = db.execute(
+            "SELECT * FROM users WHERE username = ?", (username,)
+        ).fetchone()
 
-        if user:
+        if user and check_password_hash(user["password"], password):
             session["username"] = user["username"]
             return redirect(url_for("index"))
         return render_template("login.html", error="Identifiants incorrects.")

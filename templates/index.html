@@ -17,9 +17,10 @@
     {% for c in comments %}
         <div class="comment">
             <b>{{ c["username"] }}</b> :
-            {# VULNÉRABILITÉ OWASP A03 — XSS stocké : le filtre |safe désactive #}
-            {# l'échappement HTML automatique de Jinja2. #}
-            {{ c["content"] | safe }}
+            {# CORRECTIF OWASP A03 (XSS stocké) : le filtre |safe a été retiré. #}
+            {# Jinja2 échappe désormais automatiquement le contenu du commentaire, #}
+            {# neutralisant toute balise <script> éventuellement saisie. #}
+            {{ c["content"] }}
         </div>
     {% else %}
         <p>Aucun commentaire pour le moment.</p>
